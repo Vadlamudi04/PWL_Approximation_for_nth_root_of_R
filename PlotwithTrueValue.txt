@@ -1,0 +1,226 @@
+clc; clear; close all;
+
+N_values = 2:7;
+colors = ['r', 'g', 'b', 'm', 'c', 'k']; % Different colors for comparison plot
+figure_all = figure; % Create figure for comparison
+
+for n_idx = 1:length(N_values)
+    N = N_values(n_idx);
+    Mr = 1:1/2^15:(2-1/2^15);
+    Er = -14:1:15;
+    LMR = length(Mr);
+    LER = length(Er);
+
+    F = 1; % Flag for while loop
+    Arr_Err = [];
+    True_val = [];
+    Approx_val = [];
+    Err_hw = 1.9531 * 10^-3;
+    mae_hw = Err_hw;
+    QF = 0.3;
+    Err_sw = QF * mae_hw;
+    mae_sw = Err_sw;
+    rmae = mae_sw;
+    lmae = 0;
+    qw = ceil(-log2(mae_hw));
+    R = [];
+
+    while F == 1
+        Arr_Err = [];
+        R = [];
+        True_val = [];
+        Approx_val = [];
+        [k_log, b_log, si_log, ei_log] = seg_log2(15, 1, 2, mae_sw);
+        [k_pow, b_pow, si_pow, ei_pow] = seg_pow2(15, 0, 1, mae_sw);
+
+        for j = 1:LER
+            for m = 1:LMR
+                f = pow2((Er(j) + log2(Mr(m))) / N);
+                idx1=1;
+                for k=2:length(si_log)
+                    if(si_log(k)>Mr(m))
+                        idx1=k-1;
+                        break;
+                    end
+                end
+                ki_log = round(k_log(idx1) * 2^qw) * 2^(-qw);
+                bi_log = round(b_log(idx1) * 2^qw) * 2^(-qw);
+                hi_m = (floor(ki_log * Mr(m) * 2^qw) + bi_log * 2^qw) * 2^(-qw);
+
+                inv_N = round((1 / N) * 2^qw) * 2^(-qw);
+                P = floor((inv_N * (Er(j) + hi_m)) * 2^qw) * 2^(-qw);
+                PI = floor(P);
+                PF = P - PI;
+
+                idx2=1;
+                for k=2:length(si_pow)
+                    if(si_pow(k)>PF)
+                        idx2=k-1;
+                        break;
+                    end
+                end
+                ki_pow = round(k_pow(idx2) * 2^qw) * 2^(-qw);
+                bi_pow = round(b_pow(idx2) * 2^qw) * 2^(-qw);
+                h_pf = (floor(ki_pow * PF * 2^qw) + bi_pow * 2^qw) * 2^(-qw);
+                h = pow2(PI) * floor(h_pf * 2^qw) * 2^(-qw);
+
+                err = abs((f - h) / f);
+                if err < 0.02
+                    Arr_Err(end + 1) = err;
+                    R_val = Mr(m) * pow2(Er(j));
+                    R(end + 1) = R_val;
+                    True_val(end + 1) = R_val^(1/N);
+                    Approx_val(end + 1) = h;
+                end
+            end
+        end
+
+        Max_Err = mean(Arr_Err);
+        disp(['N = ', num2str(N), ' | Max Error: ', num2str(Max_Err)]);
+
+        if Max_Err <= Err_sw
+            if rmae - lmae < 10
+                F = 0;
+            else
+                lmae = mae_sw;
+            end
+        else
+            rmae = mae_sw;
+            mae_sw = (rmae + lmae) / 2;
+            mae_hw = mae_sw / QF;
+            if Max_Err > mae_hw
+                qw = qw + 1;
+            end
+        end
+    end
+
+    % Individual plots with dual y-axis
+    figure;
+    yyaxis left
+    plot(R, Arr_Err * 1000, 'b.');
+    ylabel('Err_r \times 1000');
+    ylim([0, max(Arr_Err * 1000) * 1.1]);
+
+    yyaxis right
+    plot(R, True_val, 'Color', [1 0.5 0], 'LineWidth', 1.5); hold on;
+    plot(R, Approx_val, 'k--', 'LineWidth', 1.2);
+    ylabel(['R^{1/', num2str(N), '}']);
+    ylim([min(True_val) * 0.95, max(True_val) * 1.05]);
+
+    xlabel('R');
+    grid on;
+    title(['Error, Approximation and True Value: R^{1/', num2str(N), '}']);
+    legend('Err_r \times 1000', ['True: R^{1/', num2str(N), '}'], ['Approximation'], 'Location', 'northwest');
+
+    % Combined plot
+    figure(figure_all);
+    hold on;
+    plot(R, Arr_Err, '.', 'MarkerSize', 3, 'Color', colors(n_idx));
+end
+
+% Final comparison plot formatting
+figure(figure_all);
+grid on;
+title('Comparison of Error for N = 2 to 7');
+xlabel('R');
+ylabel('Error');
+legend(arrayfun(@(x) sprintf('N=%d', x), N_values, 'UniformOutput', false));
+hold off;
+
+function [k_arr,b_arr,si_arr,ei_arr] = seg_log2(a,b,c,mae_sw)
+    Num = (c-b)*2^a + 1; 
+    points = linspace(b,c,Num);
+    si = 1;li = 1;ei = Num; ri = Num;
+    k_arr = [];
+    b_arr = [];
+    si_arr = [];
+    ei_arr = [];
+    while(1)
+        while(1)
+            Err = [];
+            k = (log2(points(ei))-log2(points(si)))/(ei-si);
+            b = log2(points(si))-k*points(si);
+            for i=si:ei
+                Err(end+1) = k*points(i)+b-log2(points(i));
+            end
+            MAE = (max(Err)-min(Err))/2;
+            if(MAE <= mae_sw)
+                if(ei == ri || ei == ri-1)
+                    k_arr(end+1) = k;
+                    b_arr(end+1) = b + (max(Err)+min(Err))/2;
+                    si_arr(end+1) = points(si);
+                    ei_arr(end+1) = points(ei);
+                    break;
+                else
+                    li = ei;
+                    ei = ceil((li+ri)/2);
+                end
+            else
+                ri = ei;
+                ei = floor((li+ri)/2);
+            end
+        end
+        if(ei == Num)
+            break;
+        elseif(ei == Num-1)
+            k = (log2(points(Num))-log2(points(Num-1)));
+            b = log2(points(Num))-k*points(Num-1);
+            k_arr(end+1) = k;
+            b_arr(end+1) = b + (k*points(Num)+b-log2(points(Num))+k*points(Num-1)+b-log2(points(Num-1)))/2;
+            si_arr(end+1) = points(Num-1);
+            ei_arr(end+1) = points(Num);
+            break;
+        else
+            si = ei;li = ei; ei = Num; ri = Num;
+        end
+    end
+end
+
+function [k_arr,b_arr,si_arr,ei_arr] = seg_pow2(a,b,c,mae_sw)
+    Num = (c-b)*2^a + 1; 
+    points = linspace(b,c,Num);
+    si = 1;li = 1;ei = Num; ri = Num;
+    k_arr = [];
+    b_arr = [];
+    si_arr = [];
+    ei_arr = [];
+    while(1)
+        while(1)
+            Err = [];
+            k = (pow2(points(ei))-pow2(points(si)))/(ei-si);
+            b = pow2(points(si))-k*points(si);
+            for i=si:ei
+                Err(end+1) = k*points(i)+b-pow2(points(i));
+            end
+            MAE = (max(Err)-min(Err))/2;
+            if(MAE <= mae_sw)
+                if(ei == ri || ei == ri-1)
+                    k_arr(end+1) = k;
+                    b_arr(end+1) = b + (max(Err)+min(Err))/2;
+                    si_arr(end+1) = points(si);
+                    ei_arr(end+1) = points(ei);
+                    break;
+                else
+                    li = ei;
+                    ei = ceil((ei+ri)/2);
+                end
+            else
+                ri = ei;
+                ei = floor((li+ei)/2);
+            end
+        end
+        if(ei == Num)
+            break;
+        elseif(ei == Num-1)
+            k = (pow2(points(Num))-pow2(points(Num-1)));
+            b = pow2(points(Num))-k*points(Num-1);
+            k_arr(end+1) = k;
+            b_arr(end+1) = b + (k*points(Num)+b-pow2(points(Num))+k*points(Num-1)+b-pow2(points(Num-1)))/2;
+            si_arr(end+1) = points(Num-1);
+            ei_arr(end+1) = points(Num);
+            break;
+        else
+            si = ei;li = ei; ei = Num; ri = Num;
+        end
+    end
+end
